@@ -412,6 +412,30 @@ describe('compileExpression', () => {
   });
 
   describe('unary expressions', () => {
+    it.each([
+      ['not (True and False)', 'not (True and False)'],
+      [
+        '@variables.a and not (@variables.b or @variables.c)',
+        'state.a and not (state.b or state.c)',
+      ],
+      ['-(1 + 2)', '-(1 + 2)'],
+      ['not True', 'not True'],
+      ['-1', '-1'],
+    ])('preserves operand grouping in %s', (source, expected) => {
+      ctx.mutableVariableNames.add('a');
+      ctx.mutableVariableNames.add('b');
+      ctx.mutableVariableNames.add('c');
+      const { rootNode } = parse(`value: ${source}\n`);
+      const mapping =
+        rootNode.namedChildren.find(node => node.type === 'mapping') ??
+        rootNode;
+      const result = new Dialect().parse(mapping, { value: ExpressionValue });
+
+      expect(result.diagnostics).toEqual([]);
+      expect(compileExpression(result.value.value, ctx)).toBe(expected);
+      expect(ctx.diagnostics).toEqual([]);
+    });
+
     it('should compile not operator', () => {
       const expr = new UnaryExpression('not', new BooleanLiteral(true));
       expect(compileExpression(expr, ctx)).toBe('not True');
@@ -424,6 +448,27 @@ describe('compileExpression', () => {
   });
 
   describe('comparison expressions', () => {
+    it.each([
+      ['(True or False) == False', '(True or False) == False'],
+      ['True == (False or True)', 'True == (False or True)'],
+      ['(1 + 2) < (3 + 4)', '(1 + 2) < (3 + 4)'],
+      ['((1 + 2))  ==  ((3 + 4))', '(1 + 2)  ==  (3 + 4)'],
+      ['(1 + 2)==(1 + 2)', '(1 + 2)==(1 + 2)'],
+      ['1  ==  1', '1  ==  1'],
+      ['1==1', '1==1'],
+    ])('preserves operand grouping and spacing in %s', (source, expected) => {
+      const { rootNode } = parse(`value: ${source}\n`);
+      const mapping =
+        rootNode.namedChildren.find(node => node.type === 'mapping') ??
+        rootNode;
+      const result = new Dialect().parse(mapping, { value: ExpressionValue });
+
+      expect(result.diagnostics).toEqual([]);
+      expect(result.value.value).toBeInstanceOf(ComparisonExpression);
+      expect(compileExpression(result.value.value, ctx)).toBe(expected);
+      expect(ctx.diagnostics).toEqual([]);
+    });
+
     it('should compile == comparison', () => {
       ctx.mutableVariableNames.add('x');
       const expr = new ComparisonExpression(
