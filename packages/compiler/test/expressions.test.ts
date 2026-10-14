@@ -7,8 +7,11 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DiagnosticSeverity } from '@agentscript/types';
+import { parse } from '@agentscript/parser';
 import {
   type Expression,
+  Dialect,
+  ExpressionValue,
   StringLiteral,
   NumberLiteral,
   BooleanLiteral,
@@ -368,6 +371,27 @@ describe('compileExpression', () => {
   });
 
   describe('binary expressions', () => {
+    it.each([
+      ['(1 + 2) * (3 + 4)', '(1 + 2) * (3 + 4)'],
+      ['(1 + 2) * 3', '(1 + 2) * 3'],
+      ['1 * (2 + 3)', '1 * (2 + 3)'],
+      ['1 * 2', '1 * 2'],
+      [
+        '(True or False) and (False or False)',
+        '(True or False) and (False or False)',
+      ],
+    ])('preserves operand grouping in %s', (source, expected) => {
+      const { rootNode } = parse(`value: ${source}\n`);
+      const mapping =
+        rootNode.namedChildren.find(node => node.type === 'mapping') ??
+        rootNode;
+      const result = new Dialect().parse(mapping, { value: ExpressionValue });
+
+      expect(result.diagnostics).toEqual([]);
+      expect(result.value.value).toBeInstanceOf(BinaryExpression);
+      expect(compileExpression(result.value.value, ctx)).toBe(expected);
+    });
+
     it('should compile binary addition', () => {
       const expr = new BinaryExpression(
         new NumberLiteral(1),

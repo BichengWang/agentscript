@@ -474,21 +474,15 @@ function compileBinaryExpression(
     rightCst?.parent?.type === 'parenthesized_expression' ||
     rightCst?.parent?.parent?.type === 'parenthesized_expression';
 
-  if (rightParenthesized) {
-    return `${left} ${expr.operator} (${right})`;
-  }
-
   // Check if the left operand was parenthesized
   const leftCst = expr.left.__cst?.node;
   const leftParenthesized =
     leftCst?.parent?.type === 'parenthesized_expression' ||
     leftCst?.parent?.parent?.type === 'parenthesized_expression';
 
-  if (leftParenthesized) {
-    return `(${left}) ${expr.operator} ${right}`;
-  }
-
-  return `${left} ${expr.operator} ${right}`;
+  const compiledLeft = leftParenthesized ? `(${left})` : left;
+  const compiledRight = rightParenthesized ? `(${right})` : right;
+  return `${compiledLeft} ${expr.operator} ${compiledRight}`;
 }
 
 function compileUnaryExpression(
