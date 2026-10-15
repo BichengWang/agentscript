@@ -31,7 +31,7 @@ import {
   decomposeAtMemberExpression,
   escapeStringValue,
 } from '@agentscript/language';
-import type { Range } from '@agentscript/types';
+import type { Range, SyntaxNode } from '@agentscript/types';
 import type { CompilerContext } from '../compiler-context.js';
 import { extractNumberValue } from '../ast-helpers.js';
 
@@ -458,36 +458,42 @@ function compileSlice(
   return `${start}:${stop}`;
 }
 
+function getParenthesizedCst(expr: Expression): SyntaxNode | undefined {
+  let node = expr.__cst?.node;
+  let parenthesized: SyntaxNode | undefined;
+  // The dialect unwraps grouping and expression/atom nodes from the AST.
+  // Retain the outermost grouping node for comparison source-text boundaries.
+  while (node) {
+    if (node.type === 'parenthesized_expression') parenthesized = node;
+    const parent = node.parent;
+    if (
+      parent?.type !== 'parenthesized_expression' &&
+      parent?.type !== 'expression' &&
+      parent?.type !== 'atom'
+    ) {
+      break;
+    }
+    node = parent;
+  }
+  return parenthesized;
+}
+
+function compileOperand(
+  expr: Expression,
+  ctx: CompilerContext,
+  opts: CompileExpressionOptions
+): string {
+  const compiled = compileExprNode(expr, ctx, opts);
+  return getParenthesizedCst(expr) ? `(${compiled})` : compiled;
+}
+
 function compileBinaryExpression(
   expr: BinaryExpression,
   ctx: CompilerContext,
   opts: CompileExpressionOptions
 ): string {
-  const left = compileExprNode(expr.left, ctx, opts);
-  const right = compileExprNode(expr.right, ctx, opts);
-
-  // Check if the right operand was parenthesized in the source
-  // CST structure: parenthesized_expression > expression > binary_expression
-  // So we need to check parent or grandparent for parenthesized_expression
-  const rightCst = expr.right.__cst?.node;
-  const rightParenthesized =
-    rightCst?.parent?.type === 'parenthesized_expression' ||
-    rightCst?.parent?.parent?.type === 'parenthesized_expression';
-
-  if (rightParenthesized) {
-    return `${left} ${expr.operator} (${right})`;
-  }
-
-  // Check if the left operand was parenthesized
-  const leftCst = expr.left.__cst?.node;
-  const leftParenthesized =
-    leftCst?.parent?.type === 'parenthesized_expression' ||
-    leftCst?.parent?.parent?.type === 'parenthesized_expression';
-
-  if (leftParenthesized) {
-    return `(${left}) ${expr.operator} ${right}`;
-  }
-
+  const left = compileOperand(expr.left, ctx, opts);
+  const right = compileOperand(expr.right, ctx, opts);
   return `${left} ${expr.operator} ${right}`;
 }
 
@@ -496,7 +502,7 @@ function compileUnaryExpression(
   ctx: CompilerContext,
   opts: CompileExpressionOptions
 ): string {
-  const operand = compileExprNode(expr.operand, ctx, opts);
+  const operand = compileOperand(expr.operand, ctx, opts);
   if (expr.operator === 'not') {
     return `not ${operand}`;
   }
@@ -508,19 +514,22 @@ function compileComparisonExpression(
   ctx: CompilerContext,
   opts: CompileExpressionOptions
 ): string {
-  const left = compileExprNode(expr.left, ctx, opts);
-  const right = compileExprNode(expr.right, ctx, opts);
+  const left = compileOperand(expr.left, ctx, opts);
+  const right = compileOperand(expr.right, ctx, opts);
 
   // Preserve original whitespace around the operator from the source text
   const cstText = expr.__cst?.node?.text;
   if (cstText) {
-    const leftCst = expr.left.__cst?.node?.text;
-    const rightCst = expr.right.__cst?.node?.text;
+    const leftCst = (getParenthesizedCst(expr.left) ?? expr.left.__cst?.node)
+      ?.text;
+    const rightCst = (getParenthesizedCst(expr.right) ?? expr.right.__cst?.node)
+      ?.text;
     if (leftCst && rightCst) {
       // Extract the operator with surrounding whitespace from the CST
-      const leftEnd = cstText.indexOf(leftCst) + leftCst.length;
+      const leftStart = cstText.indexOf(leftCst);
+      const leftEnd = leftStart + leftCst.length;
       const rightStart = cstText.lastIndexOf(rightCst);
-      if (leftEnd >= 0 && rightStart > leftEnd) {
+      if (leftStart >= 0 && rightStart > leftEnd) {
         const operatorWithSpace = cstText.slice(leftEnd, rightStart);
         return `${left}${operatorWithSpace}${right}`;
       }
